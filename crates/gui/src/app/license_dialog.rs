@@ -6,7 +6,7 @@ const LICENSE_TEXT: &str = include_str!("../../LICENSE");
 
 impl NtscApp {
     pub fn show_license_dialog(&mut self, ctx: &egui::Context) {
-        egui::Window::new("License")
+        egui::Window::new(self.language.text("License").as_ref())
             .open(&mut self.license_dialog_open)
             .default_width(500.0)
             .default_height(400.0)

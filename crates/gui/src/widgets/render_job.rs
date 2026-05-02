@@ -6,6 +6,7 @@ use gstreamer::ClockTime;
 use crate::app::{
     error::ApplicationError,
     format_eta::format_eta,
+    i18n::Language,
     render_job::{RenderJob, RenderJobProgress, RenderJobState},
 };
 
@@ -26,7 +27,7 @@ pub struct RenderJobResponse {
 }
 
 impl RenderJobWidget<'_> {
-    pub fn show(self, ui: &mut egui::Ui) -> RenderJobResponse {
+    pub fn show(self, ui: &mut egui::Ui, language: Language) -> RenderJobResponse {
         let job = self.render_job;
         let InnerResponse {
             inner: (closed, error),
@@ -88,26 +89,24 @@ impl RenderJobWidget<'_> {
                     }
 
                     ui.label(match &job_state {
-                        RenderJobState::Waiting => Cow::Borrowed("Waiting..."),
+                        RenderJobState::Waiting => language.text("Waiting..."),
                         RenderJobState::Rendering => {
                             if let (Some(position), Some(duration)) = (job_position, job_duration) {
-                                Cow::Owned(format!(
-                                    "Rendering... ({:.2} / {:.2})",
-                                    position, duration
-                                ))
+                                Cow::Owned(language.rendering_progress(position, duration))
                             } else {
-                                Cow::Borrowed("Rendering...")
+                                language.text("Rendering...")
                             }
                         }
-                        RenderJobState::Paused => Cow::Borrowed("Paused"),
+                        RenderJobState::Paused => language.text("Paused"),
                         // if the job's start_time is missing, it's probably because it never got a chance to update--in that case, just say it took 0 seconds
-                        RenderJobState::Complete { end_time } => Cow::Owned(format!(
-                            "Completed in {:.2}",
+                        RenderJobState::Complete { end_time } => Cow::Owned(language.completed_in(
                             ClockTime::from_mseconds(
                                 ((*end_time - job.start_time.unwrap_or(*end_time)) * 1000.0) as u64
-                            )
+                            ),
                         )),
-                        RenderJobState::Error(err) => Cow::Owned(format!("Error: {err}")),
+                        RenderJobState::Error(err) => {
+                            Cow::Owned(language.render_error(&err.to_string()))
+                        }
                     });
 
                     if matches!(
@@ -115,22 +114,18 @@ impl RenderJobWidget<'_> {
                         RenderJobState::Rendering | RenderJobState::Paused
                     ) && let Some(time_remaining) = estimated_time_remaining
                     {
-                        let mut label = String::from("Time remaining: ");
+                        let mut label = language.text("Time remaining: ").into_owned();
                         format_eta(
                             &mut label,
                             time_remaining,
-                            [
-                                [" hour", " hours"],
-                                [" minute", " minutes"],
-                                [" second", " seconds"],
-                            ],
+                            language.eta_units(),
                             ", ",
                         );
                         ui.label(&label);
                     }
                     if matches!(job_state, RenderJobState::Complete { .. }) {
                         ui.horizontal(|ui| {
-                            if ui.button("Open containing folder").clicked()
+                            if ui.button(language.text("Open containing folder")).clicked()
                                 && let Some(parent) = job.settings.output_path.parent()
                             {
                                 let _ = open::that_detached(parent);

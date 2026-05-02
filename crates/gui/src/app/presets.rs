@@ -27,6 +27,7 @@ use super::{
         JSONParseSnafu, JSONReadSnafu, RenamePresetSnafu,
     },
     executor::AppExecutor,
+    i18n::Language,
     layout_helper::LayoutHelper,
 };
 
@@ -341,6 +342,7 @@ impl PresetsListState {
         dir: &DirListing,
         just_pressed_save: bool,
         selected_preset_modified: bool,
+        language: Language,
     ) -> Option<Action> {
         let mut action = None;
 
@@ -360,7 +362,7 @@ impl PresetsListState {
                 ui.add(egui::Spinner::new());
             }
             DirState::Error => {
-                ui.label("Error loading presets directory");
+                ui.label(language.text("Error loading presets directory"));
             }
             DirState::Loaded(presets) | DirState::Loading(Some(presets)) => {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
@@ -371,8 +373,13 @@ impl PresetsListState {
                     for entry in presets.iter() {
                         match entry {
                             DirEntry::File { path } => {
-                                if let Some(new_action) =
-                                    self.show_preset_entry(ui, path, dir, selected_preset_modified)
+                                if let Some(new_action) = self.show_preset_entry(
+                                    ui,
+                                    path,
+                                    dir,
+                                    selected_preset_modified,
+                                    language,
+                                )
                                 {
                                     action = Some(new_action);
                                 }
@@ -385,6 +392,7 @@ impl PresetsListState {
                                     dir,
                                     just_pressed_save,
                                     selected_preset_modified,
+                                    language,
                                 ) {
                                     action = Some(new_action);
                                 }
@@ -396,7 +404,7 @@ impl PresetsListState {
                         Some((new_preset_parent, new_preset_name)) if new_preset_parent == dir => {
                             ui.rtl(|ui| {
                                 let close_button = ui.button("🗙");
-                                let save_button = ui.button("Save");
+                                let save_button = ui.button(language.text("Save"));
                                 let text_edit = ui.add_sized(
                                     ui.available_size(),
                                     egui::TextEdit::singleline(new_preset_name),
@@ -454,6 +462,7 @@ impl PresetsListState {
         parent: &DirListing,
         just_pressed_save: bool,
         selected_preset_modified: bool,
+        language: Language,
     ) -> Option<Action> {
         let id = ui.make_persistent_id(listing.path());
         let mut collapse_state =
@@ -477,7 +486,7 @@ impl PresetsListState {
         let InnerResponse {
             inner: mut action,
             response,
-        } = self.show_entry_name(ui, listing.path(), parent, &label_name, false);
+        } = self.show_entry_name(ui, listing.path(), parent, &label_name, false, language);
         if response.clicked() {
             collapse_state.toggle(ui);
         }
@@ -489,6 +498,7 @@ impl PresetsListState {
                 listing,
                 just_pressed_save,
                 selected_preset_modified,
+                language,
             ) {
                 action = Some(new_action);
             }
@@ -503,6 +513,7 @@ impl PresetsListState {
         preset_path: &Path,
         parent: &DirListing,
         selected_preset_modified: bool,
+        language: Language,
     ) -> Option<Action> {
         let selected = self
             .selected_preset
@@ -521,7 +532,7 @@ impl PresetsListState {
         let InnerResponse {
             inner: mut action,
             response,
-        } = self.show_entry_name(ui, preset_path, parent, &file_name, selected);
+        } = self.show_entry_name(ui, preset_path, parent, &file_name, selected, language);
         if response.clicked() {
             action = Some(Action::LoadPreset {
                 path: preset_path.to_path_buf(),
@@ -538,6 +549,7 @@ impl PresetsListState {
         parent: &DirListing,
         label: &str,
         selected: bool,
+        language: Language,
     ) -> InnerResponse<Option<Action>> {
         let mut action = None;
         let mut close_rename = false;
@@ -573,7 +585,7 @@ impl PresetsListState {
             let entry_label = ui.add(egui::Button::selectable(selected, label));
 
             entry_label.context_menu(|ui| {
-                if ui.button("Delete").clicked() {
+                if ui.button(language.text("Delete")).clicked() {
                     action = Some(Action::DeletePreset {
                         path: path.to_owned(),
                         parent: parent.clone(),
@@ -581,7 +593,7 @@ impl PresetsListState {
                     ui.close();
                 }
 
-                if ui.button("Rename").clicked() {
+                if ui.button(language.text("Rename")).clicked() {
                     *renamed_preset = Some((
                         path.to_path_buf(),
                         path.file_name()
@@ -633,6 +645,7 @@ impl NtscApp {
     }
 
     pub fn show_presets_pane(&mut self, ui: &mut egui::Ui) {
+        let language = self.language;
         let Some(presets_dir_path) = NtscApp::presets_dir() else {
             return;
         };
@@ -652,12 +665,12 @@ impl NtscApp {
                 let presets_dir_state = self.presets_state.presets_dir.lock();
 
                 ui.horizontal(|ui| {
-                    if ui.button("Open folder").clicked() {
+                    if ui.button(language.text("Open folder")).clicked() {
                         action = Some(Action::OpenPresetsDir {
                             path: presets_dir_path.clone(),
                         });
                     }
-                    if ui.button("Reload").clicked() {
+                    if ui.button(language.text("Reload")).clicked() {
                         match &*presets_dir_state {
                             DirState::Loading(_) => {}
                             _ => {
@@ -669,7 +682,10 @@ impl NtscApp {
                     }
 
                     if ui
-                        .add_enabled(selected_preset_modified, egui::Button::new("Overwrite"))
+                        .add_enabled(
+                            selected_preset_modified,
+                            egui::Button::new(language.text("Overwrite")),
+                        )
                         .clicked()
                         && let Some(selected_preset) =
                             self.presets_state.list_state.selected_preset.as_ref()
@@ -680,7 +696,7 @@ impl NtscApp {
                         })
                     }
 
-                    if ui.button("Save as").clicked() {
+                    if ui.button(language.text("Save as")).clicked() {
                         let mut preset_name = String::from("preset.json");
                         just_pressed_save = true;
 
@@ -726,6 +742,7 @@ impl NtscApp {
                         &root_listing,
                         just_pressed_save,
                         selected_preset_modified,
+                        language,
                     ) {
                         action = Some(new_action);
                     }

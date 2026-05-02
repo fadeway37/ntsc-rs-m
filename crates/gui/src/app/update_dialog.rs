@@ -8,10 +8,10 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use tinyjson::JsonValue;
 use ureq::{config::Config, tls::TlsConfig};
 
-use crate::app::layout_helper::LayoutHelper;
+use crate::app::{i18n::Language, layout_helper::LayoutHelper};
 
 pub struct UpdateResponse {
-    latest_release_label: String,
+    latest_release_tag: String,
     download_url: String,
     up_to_date: bool,
 }
@@ -36,7 +36,7 @@ pub enum UpdateDialogState {
 }
 
 impl UpdateDialogState {
-    pub(crate) fn show(&mut self, ctx: &egui::Context) {
+    pub(crate) fn show(&mut self, ctx: &egui::Context, language: Language) {
         if let UpdateDialogState::Loading(handle) = &self
             && handle.is_finished()
         {
@@ -49,27 +49,28 @@ impl UpdateDialogState {
                 Err(e) => UpdateDialogState::Error(e),
             }
         }
+
         let mut open = !matches!(self, UpdateDialogState::Closed);
-        egui::Window::new("Check for Updates")
+        egui::Window::new(language.text("Check for Updates").as_ref())
             .open(&mut open)
             .show(ctx, |ui| match &self {
                 UpdateDialogState::Closed => {}
                 UpdateDialogState::Loading(_) => {
                     ui.ltr(|ui| {
-                        ui.label("Checking for updates... ");
+                        ui.label(language.text("Checking for updates..."));
                         ui.add(egui::Spinner::new());
                     });
                 }
                 UpdateDialogState::Loaded(update_response) => {
-                    ui.heading(&update_response.latest_release_label);
+                    ui.heading(language.latest_version_label(&update_response.latest_release_tag));
                     if update_response.up_to_date {
-                        ui.label("✓ Up to date");
-                    } else if ui.button("Download from GitHub ⤴").clicked() {
+                        ui.label(format!("✓ {}", language.text("Up to date")));
+                    } else if ui.button(language.text("Download from GitHub ⤴")).clicked() {
                         ctx.open_url(egui::OpenUrl::new_tab(&update_response.download_url));
                     }
                 }
                 UpdateDialogState::Error(error) => {
-                    ui.label("Error checking for updates:");
+                    ui.label(language.text("Error checking for updates:"));
                     ui.monospace(error.to_string());
                 }
             });
@@ -123,7 +124,7 @@ impl UpdateDialogState {
                 let up_to_date = tag_name.strip_prefix("v") == Some(env!("CARGO_PKG_VERSION"));
 
                 Ok(UpdateResponse {
-                    latest_release_label: format!("Latest version: {tag_name}"),
+                    latest_release_tag: tag_name.clone(),
                     download_url: html_url.clone(),
                     up_to_date,
                 })

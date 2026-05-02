@@ -13,6 +13,7 @@ pub mod dnd_overlay;
 pub mod error;
 pub mod executor;
 pub mod format_eta;
+pub mod i18n;
 pub mod layout_helper;
 pub mod license_dialog;
 pub mod main;
@@ -40,6 +41,7 @@ pub struct NtscApp {
     pub audio_volume: app_state::AudioVolume,
     pub effect_preview: app_state::EffectPreviewSettings,
     pub left_panel_state: app_state::LeftPanelState,
+    pub language: i18n::Language,
     pub easy_mode_enabled: bool,
     pub effect_settings: NtscEffectFullSettings,
     pub easy_mode_settings: EasyModeFullSettings,

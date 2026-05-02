@@ -58,6 +58,7 @@ use super::{
         FsSnafu, JSONParseSnafu, JSONReadSnafu, LoadVideoSnafu,
     },
     executor::AppExecutor,
+    i18n::Language,
     layout_helper::{LayoutHelper, TopBottomPanelExt},
     pipeline_info::{PipelineInfo, PipelineMetadata, PipelineStatus},
     presets::PresetsState,
@@ -145,6 +146,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 settings,
                 easy_mode_settings,
                 mut easy_mode_enabled,
+                language,
                 render_settings,
                 scale_settings,
             ) = if let Some(storage) = cc.storage {
@@ -163,6 +165,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     .get_string("easy_mode_enabled")
                     .map(|saved_enabled| saved_enabled == "true")
                     .unwrap_or_default();
+                let language = storage
+                    .get_string("language")
+                    .and_then(|saved_language| Language::from_storage_key(&saved_language))
+                    .unwrap_or_else(Language::detect);
                 let render_settings =
                     eframe::get_value::<RenderSettings>(storage, "render_settings")
                         .unwrap_or_default();
@@ -174,6 +180,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     settings,
                     easy_mode_settings,
                     easy_mode_enabled,
+                    language,
                     render_settings,
                     scale_settings,
                 )
@@ -182,6 +189,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     NtscEffectFullSettings::default(),
                     EasyModeFullSettings::default(),
                     true,
+                    Language::detect(),
                     RenderSettings::default(),
                     VideoScaleState::default(),
                 )
@@ -197,6 +205,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 settings,
                 easy_mode_settings,
                 easy_mode_enabled,
+                language,
                 render_settings,
                 scale_settings,
                 init_state,
@@ -215,6 +224,7 @@ impl NtscApp {
         effect_settings: NtscEffectFullSettings,
         easy_mode_settings: EasyModeFullSettings,
         easy_mode_enabled: bool,
+        language: Language,
         render_settings: RenderSettings,
         scale_settings: VideoScaleState,
         gstreamer_init: GstreamerInitState,
@@ -234,6 +244,7 @@ impl NtscApp {
             audio_volume: AudioVolume::default(),
             effect_preview: EffectPreviewSettings::default(),
             left_panel_state: LeftPanelState::default(),
+            language,
             easy_mode_enabled,
             effect_settings,
             easy_mode_settings,
@@ -532,17 +543,24 @@ impl NtscApp {
         })
     }
 
-    pub fn handle_error(&self, err: &dyn Error) {
-        *self.last_error.borrow_mut() = Some(format!("{}", err));
+    pub fn handle_error(&self, err: &(dyn Error + 'static)) {
+        let error = err
+            .downcast_ref::<ApplicationError>()
+            .map(|app_error| self.language.format_application_error(app_error))
+            .unwrap_or_else(|| err.to_string());
+        *self.last_error.borrow_mut() = Some(error);
     }
 
-    pub fn handle_result<T, E: Error>(&self, result: Result<T, E>) {
+    pub fn handle_result<T, E: Error + 'static>(&self, result: Result<T, E>) {
         if let Err(err) = result {
             self.handle_error(&err);
         }
     }
 
-    pub fn handle_result_with<T, E: Error, F: FnOnce(&mut Self) -> Result<T, E>>(&mut self, cb: F) {
+    pub fn handle_result_with<T, E: Error + 'static, F: FnOnce(&mut Self) -> Result<T, E>>(
+        &mut self,
+        cb: F,
+    ) {
         let result = cb(self);
         self.handle_result(result);
     }
@@ -570,6 +588,7 @@ impl NtscApp {
         effect_settings: &mut T,
         descriptor: &SettingDescriptor<T>,
         interlace_mode: VideoInterlaceMode,
+        language: Language,
     ) -> (Response, bool) {
         let mut changed = false;
         if descriptor.id.id == setting_id::RANDOM_SEED.id
@@ -593,7 +612,7 @@ impl NtscApp {
                             egui::vec2(rand_btn_width, ui.spacing().interact_size.y),
                             egui::Button::new("🎲"),
                         )
-                        .on_hover_text("Randomize seed")
+                        .on_hover_text(language.text("Randomize seed"))
                         .clicked()
                     {
                         value = rand::random::<i32>();
@@ -602,9 +621,10 @@ impl NtscApp {
 
                     changed |= resp.changed();
 
-                    let label = ui.add(egui::Label::new(descriptor.label).truncate());
+                    let label_text = language.text(descriptor.label);
+                    let label = ui.add(egui::Label::new(label_text.as_ref()).truncate());
                     if let Some(description) = descriptor.description {
-                        label.on_hover_text(description);
+                        label.on_hover_text(language.text(description));
                     }
 
                     if changed {
@@ -635,15 +655,17 @@ impl NtscApp {
                     .iter()
                     .find(|option| option.index == selected_index)
                     .unwrap();
-                egui::ComboBox::new(&descriptor.id, descriptor.label)
-                    .selected_text(selected_item.label)
+                egui::ComboBox::new(&descriptor.id, language.text(descriptor.label).as_ref())
+                    .selected_text(language.text(selected_item.label))
                     .show_ui(ui, |ui| {
                         for item in options {
-                            let mut label =
-                                ui.selectable_label(selected_index == item.index, item.label);
+                            let mut label = ui.selectable_label(
+                                selected_index == item.index,
+                                language.text(item.label),
+                            );
 
                             if let Some(desc) = item.description {
-                                label = label.on_hover_text(desc);
+                                label = label.on_hover_text(language.text(desc));
                             }
 
                             if label.clicked() {
@@ -665,7 +687,7 @@ impl NtscApp {
 
                 let slider: Response = ui.add(
                     egui::Slider::new(&mut value, 0.0..=1.0)
-                        .text(descriptor.label)
+                        .text(language.text(descriptor.label))
                         .custom_parser(parse_expression_string)
                         .custom_formatter(format_percentage)
                         .logarithmic(*logarithmic),
@@ -685,7 +707,7 @@ impl NtscApp {
 
                 let slider = ui.add(
                     egui::Slider::new(&mut value, range.clone())
-                        .text(descriptor.label)
+                        .text(language.text(descriptor.label))
                         .custom_parser(parse_expression_string),
                 );
 
@@ -708,7 +730,7 @@ impl NtscApp {
 
                 let slider = ui.add(
                     egui::Slider::new(&mut value, range.clone())
-                        .text(descriptor.label)
+                        .text(language.text(descriptor.label))
                         .custom_parser(parse_expression_string)
                         .logarithmic(*logarithmic),
                 );
@@ -725,7 +747,7 @@ impl NtscApp {
             } => {
                 let mut value = effect_settings.get_field::<bool>(&descriptor.id).unwrap();
 
-                let checkbox = ui.checkbox(&mut value, descriptor.label);
+                let checkbox = ui.checkbox(&mut value, language.text(descriptor.label));
 
                 if checkbox.changed() {
                     let _ = effect_settings.set_field(&descriptor.id, value);
@@ -756,7 +778,8 @@ impl NtscApp {
 
                         let checkbox = ui
                             .horizontal(|ui| {
-                                let checkbox = ui.checkbox(&mut checked, descriptor.label);
+                                let checkbox =
+                                    ui.checkbox(&mut checked, language.text(descriptor.label));
 
                                 if checkbox.changed() {
                                     let _ = effect_settings.set_field(&descriptor.id, checked);
@@ -797,6 +820,7 @@ impl NtscApp {
                                 ui,
                                 children,
                                 interlace_mode,
+                                language,
                             )
                         });
 
@@ -820,6 +844,7 @@ impl NtscApp {
         ui: &mut egui::Ui,
         descriptors: &[SettingDescriptor<T>],
         interlace_mode: VideoInterlaceMode,
+        language: Language,
     ) -> bool {
         let mut changed = false;
         for descriptor in descriptors {
@@ -834,18 +859,25 @@ impl NtscApp {
                         effect_settings,
                         descriptor,
                         VideoInterlaceMode::Progressive,
+                        language,
                     )
                 });
 
                 resp.inner
             } else {
-                Self::setting_from_descriptor(ui, effect_settings, descriptor, interlace_mode)
+                Self::setting_from_descriptor(
+                    ui,
+                    effect_settings,
+                    descriptor,
+                    interlace_mode,
+                    language,
+                )
             };
 
             changed |= response.changed() || setting_changed;
 
             if let Some(desc) = descriptor.description {
-                response.on_hover_text(desc);
+                response.on_hover_text(language.text(desc));
             }
         }
 
@@ -853,16 +885,17 @@ impl NtscApp {
     }
 
     fn show_effect_settings(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let language = self.language;
         egui::TopBottomPanel::bottom("preset_copy_paste")
             .interact_height_tall(ui.ctx())
             .show_inside(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if ui.button("Save to...").clicked() {
+                    if ui.button(language.text("Save to...")).clicked() {
                         let settings_list = self.settings_list.clone();
                         let effect_settings = self.effect_settings.clone();
                         let handle = rfd::AsyncFileDialog::new()
                             .set_parent(frame)
-                            .add_filter("ntsc-rs preset", &["json"])
+                            .add_filter(language.text("Presets").as_ref(), &["json"])
                             .set_file_name("settings.json")
                             .save_file();
                         self.spawn(async move {
@@ -883,10 +916,10 @@ impl NtscApp {
                         });
                     }
 
-                    if ui.button("Load from...").clicked() {
+                    if ui.button(language.text("Load from...")).clicked() {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_parent(frame)
-                            .add_filter("ntsc-rs preset", &["json"])
+                            .add_filter(language.text("Presets").as_ref(), &["json"])
                             .pick_file();
                         self.spawn(async move {
                             let handle = handle.await;
@@ -918,7 +951,7 @@ impl NtscApp {
                         });
                     }
 
-                    if ui.button("📋 Copy").clicked() {
+                    if ui.button(format!("📋 {}", language.text("Copy"))).clicked() {
                         let json_string = self.settings_list.to_json_string(&self.effect_settings);
                         match json_string {
                             Ok(json) => {
@@ -930,7 +963,7 @@ impl NtscApp {
                         }
                     }
 
-                    let btn = ui.button("📄 Paste");
+                    let btn = ui.button(format!("📄 {}", language.text("Paste")));
 
                     let paste_popup_id = ui.make_persistent_id("paste_popup_open");
 
@@ -947,12 +980,12 @@ impl NtscApp {
                         .data(|map| map.get_temp(paste_popup_id).unwrap_or(false))
                     {
                         let mut is_open = true;
-                        egui::Window::new("Paste JSON")
+                        egui::Window::new(language.text("Paste JSON").as_ref())
                             .default_pos(btn.rect.center_top())
                             .open(&mut is_open)
                             .show(ui.ctx(), |ui| {
                                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                                    if ui.button("Load").clicked() {
+                                    if ui.button(language.text("Load")).clicked() {
                                         match self
                                             .settings_list
                                             .from_json(&self.settings_json_paste)
@@ -993,7 +1026,7 @@ impl NtscApp {
                         }
                     }
 
-                    if ui.button("Reset").clicked() {
+                    if ui.button(language.text("Reset")).clicked() {
                         self.set_effect_settings(NtscEffectFullSettings::default());
                         self.presets_state.deselect_preset();
                     }
@@ -1023,13 +1056,18 @@ impl NtscApp {
                         ui.interact(ui.available_rect_before_wrap(), id, egui::Sense::click());
                     let style = ui.style().interact(&resp);
                     ui.add(
-                        egui::Label::new(egui::RichText::new("Presets").color(style.text_color()))
+                        egui::Label::new(
+                            egui::RichText::new(language.text("Presets"))
+                                .color(style.text_color()),
+                        )
                             .selectable(false),
                     );
                 });
 
                 collapse_state.body_unindented(|ui| {
-                    if let Some(dropped_presets) = ui.show_dnd_overlay("Drop to install presets") {
+                    if let Some(dropped_presets) =
+                        ui.show_dnd_overlay(language.text("Drop to install presets"))
+                    {
                         self.install_presets(
                             dropped_presets.into_iter().filter_map(|file| file.path),
                         );
@@ -1043,7 +1081,9 @@ impl NtscApp {
             if let Some(egui::DroppedFile {
                 path: Some(preset_path),
                 ..
-            }) = self.ensure_single_file_dropped(ui.show_dnd_overlay("Drop to load preset"))
+            }) = self.ensure_single_file_dropped(
+                ui.show_dnd_overlay(language.text("Drop to load preset")),
+            )
             {
                 self.load_preset(preset_path);
             }
@@ -1056,30 +1096,34 @@ impl NtscApp {
 
                     ui.horizontal(|ui| {
                         let scale_checkbox = ui
-                            .checkbox(&mut self.video_scale.enabled, "Scale to")
+                            .checkbox(&mut self.video_scale.enabled, language.text("Scale to"))
                             .on_hover_text(
-                                "Scale the video prior to applying the effect. Real NTSC footage \
-                                 is 480 lines tall. This applies to both the preview and the \
-                                 final render, and is not saved as part of presets.",
+                                language.text(
+                                    "Scale the video prior to applying the effect. Real NTSC footage is 480 lines tall. This applies to both the preview and the final render, and is not saved as part of presets.",
+                                ),
                             );
                         ui.add_enabled_ui(self.video_scale.enabled, |ui| {
                             let drag_resp = ui.add(
                                 egui::DragValue::new(&mut self.video_scale.scale.scanlines)
                                     .range(1..=usize::MAX),
                             );
-                            ui.label("lines");
+                            ui.label(language.text("lines"));
                             let mut filter_changed = false;
                             let filter_resp = egui::ComboBox::from_id_salt("video_scale_filter")
-                                .selected_text(self.video_scale.scale.filter.label_and_tooltip().0)
+                                .selected_text(
+                                    language.text(
+                                        self.video_scale.scale.filter.label_and_tooltip().0,
+                                    ),
+                                )
                                 .show_ui(ui, |ui| {
                                     for value in VideoScaleFilter::values() {
                                         let (label_text, tooltip) = value.label_and_tooltip();
                                         let label = ui
                                             .selectable_label(
                                                 *value == self.video_scale.scale.filter,
-                                                label_text,
+                                                language.text(label_text),
                                             )
-                                            .on_hover_text(tooltip);
+                                            .on_hover_text(language.text(tooltip));
 
                                         if label.clicked() {
                                             filter_changed = true;
@@ -1087,7 +1131,9 @@ impl NtscApp {
                                         }
                                     }
                                 });
-                            filter_resp.response.on_hover_text("Resizing filter");
+                            filter_resp
+                                .response
+                                .on_hover_text(language.text("Resizing filter"));
                             if (drag_resp.changed() || scale_checkbox.changed() || filter_changed)
                                 && let Some(info) = &self.pipeline
                             {
@@ -1123,7 +1169,7 @@ impl NtscApp {
 
                     if EXPERIMENTAL_EASY_MODE {
                         settings_changed |= ui
-                            .checkbox(&mut self.easy_mode_enabled, "Easy mode")
+                            .checkbox(&mut self.easy_mode_enabled, language.text("Easy mode"))
                             .changed();
                     }
 
@@ -1133,6 +1179,7 @@ impl NtscApp {
                             ui,
                             &settings_list_easy.setting_descriptors,
                             interlace_mode,
+                            language,
                         );
                     } else {
                         settings_changed |= Self::settings_from_descriptors(
@@ -1140,6 +1187,7 @@ impl NtscApp {
                             ui,
                             &settings_list.setting_descriptors,
                             interlace_mode,
+                            language,
                         );
                     }
                     if settings_changed {
@@ -1161,19 +1209,24 @@ impl NtscApp {
             spacing.slider_width + spacing.interact_size.x + spacing.item_spacing.x;
     }
 
+    fn prevent_menu_text_wrap(ui: &mut egui::Ui) {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+    }
+
     fn show_render_settings(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let language = self.language;
         egui::Frame::central_panel(ui.style()).show(ui, |ui| {
             Self::setup_control_rows(ui);
             let mut codec_changed = false;
-            egui::ComboBox::from_label("Codec")
-                .selected_text(self.render_settings.output_codec.label())
+            egui::ComboBox::from_label(language.text("Codec"))
+                .selected_text(language.text(self.render_settings.output_codec.label()))
                 .show_ui(ui, |ui| {
                     let mut item = |item: OutputCodec| {
                         codec_changed |= ui
                             .selectable_value(
                                 &mut self.render_settings.output_codec,
                                 item,
-                                item.label(),
+                                language.text(item.label()),
                             )
                             .changed();
                     };
@@ -1195,22 +1248,24 @@ impl NtscApp {
                             &mut self.render_settings.h264_settings.quality,
                             H264Settings::QUALITY_RANGE,
                         )
-                        .text("Quality"),
+                        .text(language.text("Quality")),
                     )
                     .on_hover_text(
-                        "Video quality factor, where 0 is the worst quality and 50 is the best. \
-                         Higher quality videos take up more space.",
+                        language.text(
+                            "Video quality factor, where 0 is the worst quality and 50 is the best. Higher quality videos take up more space.",
+                        ),
                     );
                     ui.add(
                         egui::Slider::new(
                             &mut self.render_settings.h264_settings.encode_speed,
                             H264Settings::ENCODE_SPEED_RANGE,
                         )
-                        .text("Encoding speed"),
+                        .text(language.text("Encoding speed")),
                     )
                     .on_hover_text(
-                        "Encoding speed preset. Higher encoding speeds provide a worse \
-                         compression ratio, resulting in larger videos at a given quality.",
+                        language.text(
+                            "Encoding speed preset. Higher encoding speeds provide a worse compression ratio, resulting in larger videos at a given quality.",
+                        ),
                     );
                     // Disabled for now until I can find a way to query for 10-bit support
                     /*ui.checkbox(
@@ -1219,42 +1274,44 @@ impl NtscApp {
                     );*/
                     ui.checkbox(
                         &mut self.render_settings.h264_settings.chroma_subsampling,
-                        "4:2:0 chroma subsampling",
+                        language.text("4:2:0 chroma subsampling"),
                     )
                     .on_hover_text(
-                        "Subsample the chrominance planes to half the resolution of the luminance \
-                         plane. Increases playback compatibility.",
+                        language.text(
+                            "Subsample the chrominance planes to half the resolution of the luminance plane. Increases playback compatibility.",
+                        ),
                     );
                 }
 
                 OutputCodec::Ffv1 => {
-                    egui::ComboBox::from_label("Bit depth")
-                        .selected_text(self.render_settings.ffv1_settings.bit_depth.label())
+                    egui::ComboBox::from_label(language.text("Bit depth"))
+                        .selected_text(language.text(self.render_settings.ffv1_settings.bit_depth.label()))
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.render_settings.ffv1_settings.bit_depth,
                                 Ffv1BitDepth::Bits8,
-                                Ffv1BitDepth::Bits8.label(),
+                                language.text(Ffv1BitDepth::Bits8.label()),
                             );
                             ui.selectable_value(
                                 &mut self.render_settings.ffv1_settings.bit_depth,
                                 Ffv1BitDepth::Bits10,
-                                Ffv1BitDepth::Bits10.label(),
+                                language.text(Ffv1BitDepth::Bits10.label()),
                             );
                             ui.selectable_value(
                                 &mut self.render_settings.ffv1_settings.bit_depth,
                                 Ffv1BitDepth::Bits12,
-                                Ffv1BitDepth::Bits12.label(),
+                                language.text(Ffv1BitDepth::Bits12.label()),
                             );
                         });
 
                     ui.checkbox(
                         &mut self.render_settings.ffv1_settings.chroma_subsampling,
-                        "4:2:0 chroma subsampling",
+                        language.text("4:2:0 chroma subsampling"),
                     )
                     .on_hover_text(
-                        "Subsample the chrominance planes to half the resolution of the luminance \
-                         plane. Results in smaller files.",
+                        language.text(
+                            "Subsample the chrominance planes to half the resolution of the luminance plane. Results in smaller files.",
+                        ),
                     );
                 }
 
@@ -1264,11 +1321,12 @@ impl NtscApp {
                             &mut self.render_settings.png_sequence_settings.compression_level,
                             PngSequenceSettings::COMPRESSION_LEVEL_RANGE,
                         )
-                        .text("Compression level"),
+                        .text(language.text("Compression level")),
                     )
                     .on_hover_text(
-                        "Compression level for PNG encoding. Higher compression levels produce \
-                         smaller files but take longer to render.",
+                        language.text(
+                            "Compression level for PNG encoding. Higher compression levels produce smaller files but take longer to render.",
+                        ),
                     );
                 }
             }
@@ -1276,10 +1334,13 @@ impl NtscApp {
             ui.separator();
 
             ui.rtl(|ui| {
-                let save_file = ui.button("📁").on_hover_text("Browse for a path").clicked();
+                let save_file = ui
+                    .button("📁")
+                    .on_hover_text(language.text("Browse for a path"))
+                    .clicked();
 
                 ui.ltr(|ui| {
-                    ui.label("Destination file:");
+                    ui.label(language.text("Destination file:"));
                     let mut path = self.render_settings.output_path.to_string_lossy();
                     if ui
                         .add_sized(ui.available_size(), egui::TextEdit::singleline(&mut path))
@@ -1353,7 +1414,7 @@ impl NtscApp {
                 .unwrap_or(false)
             {
                 ui.horizontal(|ui| {
-                    ui.label("Duration:");
+                    ui.label(language.text("Duration:"));
                     if ui
                         .add(
                             egui::DragValue::new(&mut duration)
@@ -1375,20 +1436,25 @@ impl NtscApp {
             ui.add_enabled(
                 self.effect_settings.use_field.interlaced_output_allowed()
                     && self.render_settings.interlaced_output_allowed(),
-                egui::Checkbox::new(&mut self.render_settings.interlaced, "Interlaced output"),
+                egui::Checkbox::new(
+                    &mut self.render_settings.interlaced,
+                    language.text("Interlaced output"),
+                ),
             )
             .on_disabled_hover_text(
                 if !self.render_settings.interlaced_output_allowed() {
-                    "Image sequences do not support interlaced output."
+                    language.text("Image sequences do not support interlaced output.")
                 } else {
-                    "To enable interlaced output, set the \"Use field\" setting to \"Interleaved\"."
+                    language.text(
+                        "To enable interlaced output, set the \"Use field\" setting to \"Interleaved\".",
+                    )
                 },
             );
 
             if ui
                 .add_enabled(
                     !self.render_settings.output_path.as_os_str().is_empty() && src_path.is_some(),
-                    egui::Button::new("Render"),
+                    egui::Button::new(language.text("Render")),
                 )
                 .clicked()
             {
@@ -1449,7 +1515,7 @@ impl NtscApp {
                 .show(ui, |ui| {
                     self.render_jobs.retain_mut(|job| {
                         let RenderJobResponse { closed, error, .. } =
-                            RenderJobWidget::new(job).show(ui);
+                            RenderJobWidget::new(job).show(ui, language);
                         if let Some(error) = error {
                             render_job_error = Some(error);
                         }
@@ -1464,6 +1530,7 @@ impl NtscApp {
     }
 
     fn show_video_pane(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let language = self.language;
         let last_seek_pos = if let Some(info) = &mut self.pipeline {
             // While seeking, GStreamer sometimes doesn't return a timecode. In that case, use the last timecode it
             // did respond with.
@@ -1510,14 +1577,14 @@ impl NtscApp {
 
                         ui.separator();
 
-                        if ui.button("Save frame").clicked() {
+                        if ui.button(language.text("Save frame")).clicked() {
                             let src_path = info.path.clone();
 
                             let dst_path = src_path.with_extension("");
                             save_image_to = Some((src_path, dst_path));
                         }
 
-                        if ui.button("Copy frame").clicked() {
+                        if ui.button(language.text("Copy frame")).clicked() {
                             let egui_sink =
                                 info.egui_sink.downcast_ref::<elements::EguiSink>().unwrap();
 
@@ -1531,7 +1598,7 @@ impl NtscApp {
                                 Some(true) => {
                                     let mut new_framerate = current_framerate.numer() as f64
                                         / current_framerate.denom() as f64;
-                                    ui.label("fps");
+                                    ui.label(language.text("fps"));
                                     if ui
                                         .add(
                                             egui::DragValue::new(&mut new_framerate)
@@ -1559,12 +1626,19 @@ impl NtscApp {
                                             / current_framerate.denom() as f64
                                     );
                                     if let Some(interlace_mode) = metadata.interlace_mode {
-                                        fps_display.push_str(match interlace_mode {
-                                            VideoInterlaceMode::Progressive => " (progressive)",
-                                            VideoInterlaceMode::Interleaved => " (interlaced)",
-                                            VideoInterlaceMode::Mixed => " (telecined)",
-                                            _ => "",
-                                        });
+                                        let interlace_label = match interlace_mode {
+                                            VideoInterlaceMode::Progressive => {
+                                                language.text(" (progressive)")
+                                            }
+                                            VideoInterlaceMode::Interleaved => {
+                                                language.text(" (interlaced)")
+                                            }
+                                            VideoInterlaceMode::Mixed => {
+                                                language.text(" (telecined)")
+                                            }
+                                            _ => std::borrow::Cow::Borrowed(""),
+                                        };
+                                        fps_display.push_str(interlace_label.as_ref());
                                     }
                                     ui.label(fps_display);
                                 }
@@ -1750,7 +1824,7 @@ impl NtscApp {
                     ui.separator();
 
                     ui.add(egui::Label::new("🔎").selectable(false))
-                        .on_hover_text("Zoom preview");
+                        .on_hover_text(language.text("Zoom preview"));
                     ui.add_enabled(
                         !self.video_zoom.fit,
                         egui::DragValue::new(&mut self.video_zoom.scale)
@@ -1760,7 +1834,7 @@ impl NtscApp {
                             // Treat as a percentage above 8x zoom
                             .custom_parser(|input| parse_decimal_or_percentage(input, 8.0)),
                     );
-                    ui.checkbox(&mut self.video_zoom.fit, "Fit");
+                    ui.checkbox(&mut self.video_zoom.fit, language.text("Fit"));
 
                     ui.separator();
 
@@ -1786,9 +1860,9 @@ impl NtscApp {
                                 }
                             })
                             .on_hover_text(if self.audio_volume.mute {
-                                "Unmute"
+                                language.text("Unmute")
                             } else {
-                                "Mute"
+                                language.text("Mute")
                             })
                             .clicked()
                         {
@@ -1837,26 +1911,26 @@ impl NtscApp {
 
                     let mut update_effect_preview = false;
                     ui.add(egui::Label::new("✨").selectable(false))
-                        .on_hover_text("Effect preview");
+                        .on_hover_text(language.text("Effect preview"));
                     update_effect_preview |= ui
                         .selectable_value(
                             &mut self.effect_preview.mode,
                             EffectPreviewMode::Enabled,
-                            "Enable",
+                            language.text("Enable"),
                         )
                         .changed();
                     update_effect_preview |= ui
                         .selectable_value(
                             &mut self.effect_preview.mode,
                             EffectPreviewMode::Disabled,
-                            "Disable",
+                            language.text("Disable"),
                         )
                         .changed();
                     update_effect_preview |= ui
                         .selectable_value(
                             &mut self.effect_preview.mode,
                             EffectPreviewMode::SplitScreen,
-                            "Split",
+                            language.text("Split"),
                         )
                         .changed();
 
@@ -1903,7 +1977,7 @@ impl NtscApp {
                                 path: Some(dropped_media_path),
                                 ..
                             }) = self.ensure_single_file_dropped(
-                                ui.show_dnd_overlay("Drop to load media"),
+                                ui.show_dnd_overlay(language.text("Drop to load media")),
                             ) {
                                 let res = self.load_video(ui.ctx(), dropped_media_path);
                                 self.handle_result(res);
@@ -1915,7 +1989,8 @@ impl NtscApp {
                                     else {
                                         ui.add(
                                             egui::Label::new(
-                                                egui::RichText::new("No media loaded").heading(),
+                                                egui::RichText::new(language.text("No media loaded"))
+                                                    .heading(),
                                             )
                                             .selectable(false),
                                         );
@@ -2031,7 +2106,8 @@ impl NtscApp {
     }
 
     fn show_credits_dialog(&mut self, ctx: &egui::Context) {
-        egui::Window::new("About + Credits")
+        let language = self.language;
+        egui::Window::new(language.text("About + Credits").as_ref())
             .open(&mut self.credits_dialog_open)
             .default_width(400.0)
             .show(ctx, |ui| {
@@ -2042,7 +2118,7 @@ impl NtscApp {
 
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("by ");
+                    ui.label(language.text("by "));
                     ui.add(egui::Hyperlink::from_label_and_url(
                         "valadaptive",
                         "https://github.com/valadaptive/",
@@ -2051,7 +2127,7 @@ impl NtscApp {
 
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("...loosely based on ");
+                    ui.label(language.text("...loosely based on "));
                     ui.add(egui::Hyperlink::from_label_and_url(
                         "JargeZ/ntscqt",
                         "https://github.com/JargeZ/ntscqt/",
@@ -2060,7 +2136,7 @@ impl NtscApp {
 
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("...which is a GUI for ");
+                    ui.label(language.text("...which is a GUI for "));
                     ui.add(egui::Hyperlink::from_label_and_url(
                         "zhuker/ntsc",
                         "https://github.com/zhuker/ntsc/",
@@ -2069,7 +2145,7 @@ impl NtscApp {
 
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("...which is a port of ");
+                    ui.label(language.text("...which is a port of "));
                     ui.add(egui::Hyperlink::from_label_and_url(
                         "joncampbell123/composite-video-simulator",
                         "https://github.com/joncampbell123/composite-video-simulator/",
@@ -2079,6 +2155,7 @@ impl NtscApp {
     }
 
     fn show_app(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let language = self.language;
         if self.credits_dialog_open {
             self.show_credits_dialog(ctx);
         }
@@ -2091,24 +2168,21 @@ impl NtscApp {
             self.show_license_dialog(ctx);
         }
 
-        self.update_dialog.show(ctx);
+        self.update_dialog.show(ctx, language);
 
         if self.image_sequence_dialog_queued_render_job.is_some() {
             let modal = egui::Modal::new(egui::Id::new("directory_not_empty")).show(ctx, |ui| {
                 ui.set_max_width(ctx.input(|i| i.content_rect().width() - 24.0).min(400.0));
                 ui.set_min_width(200.0);
-                ui.heading("Output directory is not empty");
-                ui.label(
-                    "You're rendering an image sequence into a directory that isn't empty. This \
-                     will output many individual image files into that directory.",
-                );
+                ui.heading(language.text("Output directory is not empty"));
+                ui.label(language.text("You're rendering an image sequence into a directory that isn't empty. This will output many individual image files into that directory."));
                 ui.separator();
 
                 egui::Sides::new().show(
                     ui,
                     |_| {},
                     |ui| {
-                        if ui.button("OK").clicked() {
+                        if ui.button(language.text("OK")).clicked() {
                             let job =
                                 self.image_sequence_dialog_queued_render_job.take().unwrap()(self);
                             match job {
@@ -2119,7 +2193,7 @@ impl NtscApp {
                                     self.handle_error(&e);
                                 }
                             }
-                        } else if ui.button("Cancel").clicked() {
+                        } else if ui.button(language.text("Cancel")).clicked() {
                             self.image_sequence_dialog_queued_render_job = None;
                         }
                     },
@@ -2135,8 +2209,10 @@ impl NtscApp {
             .interact_height(ctx)
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Open").clicked() {
+                    ui.menu_button(language.text("File"), |ui| {
+                        Self::prevent_menu_text_wrap(ui);
+
+                        if ui.button(language.text("Open")).clicked() {
                             let file_dialog =
                                 rfd::AsyncFileDialog::new().set_parent(frame).pick_file();
                             let ctx = ctx.clone();
@@ -2151,17 +2227,19 @@ impl NtscApp {
 
                             ui.close();
                         }
-                        if ui.button("Quit").clicked() {
+                        if ui.button(language.text("Quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             ui.close();
                         }
                     });
 
-                    ui.menu_button("Edit", |ui| {
+                    ui.menu_button(language.text("Edit"), |ui| {
+                        Self::prevent_menu_text_wrap(ui);
+
                         if ui
                             .add_enabled(
                                 self.undoer.has_undo(&self.effect_settings),
-                                egui::Button::new("Undo"),
+                                egui::Button::new(language.text("Undo")),
                             )
                             .clicked()
                         {
@@ -2171,7 +2249,7 @@ impl NtscApp {
                         if ui
                             .add_enabled(
                                 self.undoer.has_redo(&self.effect_settings),
-                                egui::Button::new("Redo"),
+                                egui::Button::new(language.text("Redo")),
                             )
                             .clicked()
                         {
@@ -2180,33 +2258,37 @@ impl NtscApp {
                         }
                     });
 
-                    ui.menu_button("View", |ui| {
-                        ui.menu_button("Theme", |ui| {
+                    ui.menu_button(language.text("View"), |ui| {
+                        Self::prevent_menu_text_wrap(ui);
+
+                        ui.menu_button(language.text("Theme"), |ui| {
+                            Self::prevent_menu_text_wrap(ui);
+
                             let mut color_theme_changed = false;
                             let mut theme_preference = ui.ctx().options(|opt| opt.theme_preference);
                             color_theme_changed |= ui
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::System,
-                                    "System",
+                                    language.text("System"),
                                 )
-                                .on_hover_text("Follow system color theme")
+                                .on_hover_text(language.text("Follow system color theme"))
                                 .changed();
                             color_theme_changed |= ui
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::Light,
-                                    "Light",
+                                    language.text("Light theme"),
                                 )
-                                .on_hover_text("Use light mode")
+                                .on_hover_text(language.text("Use light mode"))
                                 .changed();
                             color_theme_changed |= ui
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::Dark,
-                                    "Dark",
+                                    language.text("Dark"),
                                 )
-                                .on_hover_text("Use dark mode")
+                                .on_hover_text(language.text("Use dark mode"))
                                 .changed();
 
                             if color_theme_changed {
@@ -2217,7 +2299,9 @@ impl NtscApp {
                             }
                         });
 
-                        ui.menu_button("Zoom", |ui| {
+                        ui.menu_button(language.text("Zoom"), |ui| {
+                            Self::prevent_menu_text_wrap(ui);
+
                             let mut zoom = ui.ctx().zoom_factor();
                             let mut changed = false;
                             const ZOOM_FACTORS: &[f32] = &[0.75, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0];
@@ -2235,32 +2319,51 @@ impl NtscApp {
                                 ui.close()
                             }
                         });
+
+                        ui.menu_button(language.text("Language"), |ui| {
+                            Self::prevent_menu_text_wrap(ui);
+
+                            for item_language in Language::ALL {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.language,
+                                        item_language,
+                                        item_language.display_name(),
+                                    )
+                                    .changed()
+                                {
+                                    ui.close();
+                                }
+                            }
+                        });
                     });
 
-                    ui.menu_button("Help", |ui| {
-                        if ui.button("Online Documentation ⤴").clicked() {
+                    ui.menu_button(language.text("Help"), |ui| {
+                        Self::prevent_menu_text_wrap(ui);
+
+                        if ui.button(language.text("Online Documentation ⤴")).clicked() {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(
                                 "https://ntsc.rs/docs/standalone-application/",
                             ));
                             ui.close();
                         }
 
-                        if ui.button("License").clicked() {
+                        if ui.button(language.text("License")).clicked() {
                             self.license_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button("Third-Party Licenses").clicked() {
+                        if ui.button(language.text("Third-Party Licenses")).clicked() {
                             self.third_party_licenses_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button("About + Credits").clicked() {
+                        if ui.button(language.text("About + Credits")).clicked() {
                             self.credits_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button("Check for Updates...").clicked() {
+                        if ui.button(language.text("Check for Updates...")).clicked() {
                             self.update_dialog.open();
                             ui.close();
                         }
@@ -2276,7 +2379,7 @@ impl NtscApp {
                                 .corner_radius(3)
                                 .fill(ui.style().visuals.extreme_bg_color)
                                 .show(ui, |ui| {
-                                    if ui.button("OK").clicked() {
+                                    if ui.button(language.text("OK")).clicked() {
                                         close_error = true;
                                     }
                                     ui.label(error);
@@ -2304,12 +2407,12 @@ impl NtscApp {
                             ui.selectable_value(
                                 &mut self.left_panel_state,
                                 LeftPanelState::EffectSettings,
-                                "Effect",
+                                language.text("Effect"),
                             );
                             ui.selectable_value(
                                 &mut self.left_panel_state,
                                 LeftPanelState::RenderSettings,
-                                "Render",
+                                language.text("Render"),
                             );
                         });
                     });
@@ -2342,11 +2445,11 @@ impl NtscApp {
         });
     }
 
-    fn show_error_screen(ctx: &egui::Context, error: &ApplicationError) {
+    fn show_error_screen(ctx: &egui::Context, language: Language, error: &ApplicationError) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
-                ui.heading("An error occurred while loading");
-                ui.label(error.to_string());
+                ui.heading(language.text("An error occurred while loading"));
+                ui.label(language.format_application_error(error));
             });
         });
     }
@@ -2383,7 +2486,7 @@ impl eframe::App for NtscApp {
                 return;
             }
             GstreamerInitState::Initialized(Err(error)) => {
-                Self::show_error_screen(ctx, error);
+                Self::show_error_screen(ctx, self.language, error);
                 return;
             }
             _ => {}
@@ -2437,6 +2540,7 @@ impl eframe::App for NtscApp {
         }
 
         storage.set_string("easy_mode_enabled", self.easy_mode_enabled.to_string());
+        storage.set_string("language", self.language.storage_key().to_string());
 
         eframe::set_value(storage, "render_settings", &self.render_settings);
         eframe::set_value(storage, "scale_settings", &self.video_scale);
