@@ -9,9 +9,7 @@
 
 ---
 
-**ntsc-rs-m** is a fork of [ntsc-rs](https://github.com/ntsc-rs/ntsc-rs), a video effect which emulates NTSC and VHS video artifacts. It can be used as an After Effects, Premiere, or OpenFX plugin, or as a standalone application.
-
-This fork keeps the original ntsc-rs functionality and adds multilingual UI support. Translations have currently been added for Simplified Chinese, Russian, and Japanese.
+**ntsc-rs** is a video effect which emulates NTSC and VHS video artifacts. It can be used as an After Effects, Premiere, or OpenFX plugin, or as a standalone application.
 
 ![Screenshot of the ntsc-rs standalone application](./docs/img/appdemo.png)
 
