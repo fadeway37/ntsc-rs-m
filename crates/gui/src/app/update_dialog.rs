@@ -51,26 +51,26 @@ impl UpdateDialogState {
         }
 
         let mut open = !matches!(self, UpdateDialogState::Closed);
-        egui::Window::new(language.text("Check for Updates").as_ref())
+        egui::Window::new(language.tr("update-check-title"))
             .open(&mut open)
             .show(ctx, |ui| match &self {
                 UpdateDialogState::Closed => {}
                 UpdateDialogState::Loading(_) => {
                     ui.ltr(|ui| {
-                        ui.label(language.text("Checking for updates..."));
+                        ui.label(language.tr("update-checking"));
                         ui.add(egui::Spinner::new());
                     });
                 }
                 UpdateDialogState::Loaded(update_response) => {
                     ui.heading(language.latest_version_label(&update_response.latest_release_tag));
                     if update_response.up_to_date {
-                        ui.label(format!("✓ {}", language.text("Up to date")));
-                    } else if ui.button(language.text("Download from GitHub ⤴")).clicked() {
+                        ui.label(format!("✓ {}", language.tr("update-up-to-date")));
+                    } else if ui.button(language.tr("ui-download-from-github")).clicked() {
                         ctx.open_url(egui::OpenUrl::new_tab(&update_response.download_url));
                     }
                 }
                 UpdateDialogState::Error(error) => {
-                    ui.label(language.text("Error checking for updates:"));
+                    ui.label(language.tr("update-error-checking"));
                     ui.monospace(error.to_string());
                 }
             });

@@ -58,7 +58,7 @@ use super::{
         FsSnafu, JSONParseSnafu, JSONReadSnafu, LoadVideoSnafu,
     },
     executor::AppExecutor,
-    i18n::Language,
+    i18n::{LANGUAGES, Language},
     layout_helper::{LayoutHelper, TopBottomPanelExt},
     pipeline_info::{PipelineInfo, PipelineMetadata, PipelineStatus},
     presets::PresetsState,
@@ -1057,10 +1057,9 @@ impl NtscApp {
                     let style = ui.style().interact(&resp);
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(language.text("Presets"))
-                                .color(style.text_color()),
+                            egui::RichText::new(language.text("Presets")).color(style.text_color()),
                         )
-                            .selectable(false),
+                        .selectable(false),
                     );
                 });
 
@@ -1989,8 +1988,10 @@ impl NtscApp {
                                     else {
                                         ui.add(
                                             egui::Label::new(
-                                                egui::RichText::new(language.text("No media loaded"))
-                                                    .heading(),
+                                                egui::RichText::new(
+                                                    language.text("No media loaded"),
+                                                )
+                                                .heading(),
                                             )
                                             .selectable(false),
                                         );
@@ -2209,10 +2210,10 @@ impl NtscApp {
             .interact_height(ctx)
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.menu_button(language.text("File"), |ui| {
+                    ui.menu_button(language.tr("menu-file"), |ui| {
                         Self::prevent_menu_text_wrap(ui);
 
-                        if ui.button(language.text("Open")).clicked() {
+                        if ui.button(language.tr("action-open")).clicked() {
                             let file_dialog =
                                 rfd::AsyncFileDialog::new().set_parent(frame).pick_file();
                             let ctx = ctx.clone();
@@ -2227,19 +2228,19 @@ impl NtscApp {
 
                             ui.close();
                         }
-                        if ui.button(language.text("Quit")).clicked() {
+                        if ui.button(language.tr("action-quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             ui.close();
                         }
                     });
 
-                    ui.menu_button(language.text("Edit"), |ui| {
+                    ui.menu_button(language.tr("menu-edit"), |ui| {
                         Self::prevent_menu_text_wrap(ui);
 
                         if ui
                             .add_enabled(
                                 self.undoer.has_undo(&self.effect_settings),
-                                egui::Button::new(language.text("Undo")),
+                                egui::Button::new(language.tr("action-undo")),
                             )
                             .clicked()
                         {
@@ -2249,7 +2250,7 @@ impl NtscApp {
                         if ui
                             .add_enabled(
                                 self.undoer.has_redo(&self.effect_settings),
-                                egui::Button::new(language.text("Redo")),
+                                egui::Button::new(language.tr("action-redo")),
                             )
                             .clicked()
                         {
@@ -2258,10 +2259,10 @@ impl NtscApp {
                         }
                     });
 
-                    ui.menu_button(language.text("View"), |ui| {
+                    ui.menu_button(language.tr("menu-view"), |ui| {
                         Self::prevent_menu_text_wrap(ui);
 
-                        ui.menu_button(language.text("Theme"), |ui| {
+                        ui.menu_button(language.tr("settings-theme"), |ui| {
                             Self::prevent_menu_text_wrap(ui);
 
                             let mut color_theme_changed = false;
@@ -2270,25 +2271,25 @@ impl NtscApp {
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::System,
-                                    language.text("System"),
+                                    language.tr("theme-system"),
                                 )
-                                .on_hover_text(language.text("Follow system color theme"))
+                                .on_hover_text(language.tr("theme-system-tooltip"))
                                 .changed();
                             color_theme_changed |= ui
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::Light,
-                                    language.text("Light theme"),
+                                    language.tr("theme-light-menu"),
                                 )
-                                .on_hover_text(language.text("Use light mode"))
+                                .on_hover_text(language.tr("theme-light-tooltip"))
                                 .changed();
                             color_theme_changed |= ui
                                 .selectable_value(
                                     &mut theme_preference,
                                     egui::ThemePreference::Dark,
-                                    language.text("Dark"),
+                                    language.tr("theme-dark"),
                                 )
-                                .on_hover_text(language.text("Use dark mode"))
+                                .on_hover_text(language.tr("theme-dark-tooltip"))
                                 .changed();
 
                             if color_theme_changed {
@@ -2299,7 +2300,7 @@ impl NtscApp {
                             }
                         });
 
-                        ui.menu_button(language.text("Zoom"), |ui| {
+                        ui.menu_button(language.tr("zoom"), |ui| {
                             Self::prevent_menu_text_wrap(ui);
 
                             let mut zoom = ui.ctx().zoom_factor();
@@ -2320,15 +2321,15 @@ impl NtscApp {
                             }
                         });
 
-                        ui.menu_button(language.text("Language"), |ui| {
+                        ui.menu_button(language.tr("settings-language"), |ui| {
                             Self::prevent_menu_text_wrap(ui);
 
-                            for item_language in Language::ALL {
+                            for item in LANGUAGES {
                                 if ui
                                     .selectable_value(
                                         &mut self.language,
-                                        item_language,
-                                        item_language.display_name(),
+                                        item.language,
+                                        item.display_name,
                                     )
                                     .changed()
                                 {
@@ -2338,32 +2339,35 @@ impl NtscApp {
                         });
                     });
 
-                    ui.menu_button(language.text("Help"), |ui| {
+                    ui.menu_button(language.tr("menu-help"), |ui| {
                         Self::prevent_menu_text_wrap(ui);
 
-                        if ui.button(language.text("Online Documentation ⤴")).clicked() {
+                        if ui.button(language.tr("ui-online-documentation")).clicked() {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(
                                 "https://ntsc.rs/docs/standalone-application/",
                             ));
                             ui.close();
                         }
 
-                        if ui.button(language.text("License")).clicked() {
+                        if ui.button(language.tr("help-license")).clicked() {
                             self.license_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button(language.text("Third-Party Licenses")).clicked() {
+                        if ui
+                            .button(language.tr("help-third-party-licenses"))
+                            .clicked()
+                        {
                             self.third_party_licenses_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button(language.text("About + Credits")).clicked() {
+                        if ui.button(language.tr("window-about-credits")).clicked() {
                             self.credits_dialog_open = true;
                             ui.close();
                         }
 
-                        if ui.button(language.text("Check for Updates...")).clicked() {
+                        if ui.button(language.tr("update-check-menu")).clicked() {
                             self.update_dialog.open();
                             ui.close();
                         }

@@ -18,6 +18,11 @@ gstreamer-base = "0.24"
 gstreamer-video = "0.24"
 gstreamer-pbutils = "0.24"
 gst-plugin-webp = { version = "0.14.1", features = ["static"] }
+i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10.0"
+rust-embed = "8"
+unic-langid = "0.9"
+sys-locale = "0.3"
 futures-lite = "2.3.0"
 async-executor = "1.12.0"
 log = "0.4.20"

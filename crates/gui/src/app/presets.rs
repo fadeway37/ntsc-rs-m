@@ -379,8 +379,7 @@ impl PresetsListState {
                                     dir,
                                     selected_preset_modified,
                                     language,
-                                )
-                                {
+                                ) {
                                     action = Some(new_action);
                                 }
                             }
